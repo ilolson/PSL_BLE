@@ -17,11 +17,10 @@
   },
   "groups" : [
     {
-      "blur-material" : null,
       "layers" : [
         {
-          "image-name" : "ws2812art 2.png",
-          "name" : "ws2812art 2",
+          "image-name" : "ws2812art.png",
+          "name" : "ws2812art",
           "position" : {
             "scale" : 2.5,
             "translation-in-points" : [
@@ -32,10 +31,9 @@
         }
       ],
       "shadow" : {
-        "kind" : "layer-color",
-        "opacity" : 1
+        "kind" : "neutral",
+        "opacity" : 0.5
       },
-      "specular" : true,
       "translucency" : {
         "enabled" : true,
         "value" : 0.5
