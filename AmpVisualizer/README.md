@@ -65,7 +65,7 @@ Run the terminal version to control the same 300-light PSL BLE strip as the Xcod
 
 The main `./build.sh` also builds this executable. Allow Bluetooth access for your terminal when macOS prompts, and power on PSL. It discovers PSL by name or the Xcode service UUID, connects automatically, and sends current settings when ready. Disconnects trigger another scan.
 
-Use left/right arrows to decrease/increase hue by 5° (wrapping around the color wheel), and up/down arrows to increase/decrease brightness by 1% (clamped to 0–100%). Press `+`/`-` to increase/decrease the segment length by one light, or `[`/`]` to move it left/right by one light. Length stays within 1–300 lights, and movement stops at the strip ends. These segment shortcuts work when the command line is empty. Changes send immediately without Enter. You can also enter commands one per line:
+Use left/right arrows to decrease/increase hue by 5° (wrapping around the color wheel), and up/down arrows to increase/decrease brightness by 1% (clamped to 0–100%). Press `+`/`-` to increase/decrease the segment length by two lights, or `[`/`]` to move it left/right by two lights. Shift+Left/Right also moves the segment by two lights. Length stays within 1–300 lights, and movement stops at the strip ends. These segment shortcuts work when the command line is empty. Changes send immediately without Enter. You can also enter commands one per line:
 
 ```text
 hue 25

@@ -181,8 +181,9 @@ final class LightController {
     static let help = """
     ← / →               Decrease / increase hue by 5° (wraps)
     ↑ / ↓               Increase / decrease brightness by 1%
-    + / -               Increase / decrease segment length by 1 light
-    [ / ]               Move segment left / right by 1 light
+    + / -               Increase / decrease segment length by 2 lights
+    [ / ]               Move segment left / right by 2 lights
+    Shift + ← / →       Move segment left / right by 2 lights
     hue <0–360>          Set solid hue in degrees
     brightness <0–100>   Set brightness percent
     center <1–300>       Move segment (clamped to fit its width)
@@ -197,7 +198,11 @@ final class LightController {
     func summary() {
         print("\(bleManager.status) · Hue \(hue)° · Brightness \(brightness)% · Segment \(segmentStart)…\(segmentEnd) · Center \(segmentCenter) · Width \(segmentWidth) · Rainbow \(rainbowEnabled ? "on" : "off")")
     }
-    func arrow(_ key: UInt8) {
+    func arrow(_ key: UInt8, shifted: Bool = false) {
+        if shifted && (key == 68 || key == 67) {
+            segmentKey(key == 68 ? 91 : 93)
+            return
+        }
         switch key {
         case 68: hue = (hue + 355).truncatingRemainder(dividingBy: 360)
         case 67: hue = (hue + 5).truncatingRemainder(dividingBy: 360)
@@ -210,10 +215,10 @@ final class LightController {
     }
     func segmentKey(_ key: UInt8) {
         switch key {
-        case 43: updateSegmentWidth(segmentWidth + 1)
-        case 45: updateSegmentWidth(segmentWidth - 1)
-        case 91: updateSegmentCenter(segmentCenter - 1)
-        case 93: updateSegmentCenter(segmentCenter + 1)
+        case 43: updateSegmentWidth(segmentWidth + 2)
+        case 45: updateSegmentWidth(segmentWidth - 2)
+        case 91: updateSegmentCenter(segmentCenter - 2)
+        case 93: updateSegmentCenter(segmentCenter + 2)
         default: return
         }
         summary()
@@ -562,19 +567,24 @@ DispatchQueue.global(qos: .userInitiated).async {
         var line: [UInt8] = []
         var escape = false
         var sequence = false
+        var sequenceParameters = ""
         var byte: UInt8 = 0
         while read(STDIN_FILENO, &byte, 1) == 1 {
             if sequence {
                 if byte >= 0x40 && byte <= 0x7E {
                     let key = byte
-                    DispatchQueue.main.async { controller.arrow(key) }
+                    let modifier = sequenceParameters.split(separator: ";").last.flatMap { Int($0) } ?? 1
+                    let shifted = sequenceParameters.contains(";") && (modifier - 1) & 1 != 0
+                    DispatchQueue.main.async { controller.arrow(key, shifted: shifted) }
                     sequence = false
+                } else {
+                    sequenceParameters.append(Character(UnicodeScalar(byte)))
                 }
                 continue
             }
             if escape {
                 escape = false
-                if byte == 91 || byte == 79 { sequence = true; continue }
+                if byte == 91 || byte == 79 { sequence = true; sequenceParameters = ""; continue }
             }
             switch byte {
             case 27: escape = true
