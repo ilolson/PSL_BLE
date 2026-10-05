@@ -1,5 +1,12 @@
 import Foundation
 import CoreBluetooth
+import Darwin
+
+private var savedTerminal = termios()
+private var terminalChanged = false
+private func restoreTerminal() {
+    if terminalChanged { tcsetattr(STDIN_FILENO, TCSANOW, &savedTerminal) }
+}
 
 private let serviceUUID = CBUUID(string: "21436587-A9CB-ED0F-1032-547698BADCFE")
 private let commandCharacteristicUUID = CBUUID(string: "0C1D2E3F-4051-6273-8495-A6B7C8D9EAFB")
@@ -172,6 +179,10 @@ final class LightController {
     let rainbowCycleRate: Double = 0.1
     init(_ ble: BLEManager) { bleManager = ble; ble.onReady = { [weak self] in self?.sendFrame() } }
     static let help = """
+    ← / →               Decrease / increase hue by 5° (wraps)
+    ↑ / ↓               Increase / decrease brightness by 1%
+    + / -               Increase / decrease segment length by 1 light
+    [ / ]               Move segment left / right by 1 light
     hue <0–360>          Set solid hue in degrees
     brightness <0–100>   Set brightness percent
     center <1–300>       Move segment (clamped to fit its width)
@@ -185,6 +196,27 @@ final class LightController {
     """
     func summary() {
         print("\(bleManager.status) · Hue \(hue)° · Brightness \(brightness)% · Segment \(segmentStart)…\(segmentEnd) · Center \(segmentCenter) · Width \(segmentWidth) · Rainbow \(rainbowEnabled ? "on" : "off")")
+    }
+    func arrow(_ key: UInt8) {
+        switch key {
+        case 68: hue = (hue + 355).truncatingRemainder(dividingBy: 360)
+        case 67: hue = (hue + 5).truncatingRemainder(dividingBy: 360)
+        case 65: brightness = min(100, brightness + 1)
+        case 66: brightness = max(0, brightness - 1)
+        default: return
+        }
+        sendFrame()
+        summary()
+    }
+    func segmentKey(_ key: UInt8) {
+        switch key {
+        case 43: updateSegmentWidth(segmentWidth + 1)
+        case 45: updateSegmentWidth(segmentWidth - 1)
+        case 91: updateSegmentCenter(segmentCenter - 1)
+        case 93: updateSegmentCenter(segmentCenter + 1)
+        default: return
+        }
+        summary()
     }
     func command(_ line: String) {
         let parts = line.split(whereSeparator: { $0.isWhitespace }).map(String.init)
@@ -486,6 +518,18 @@ extension LightController {
         precondition(controller.rainbowPayload()!.count == 353)
         controller.brightness = 0
         precondition(controller.buildRainbowRuns().allSatisfy { $0.color.red == 0 && $0.color.green == 0 && $0.color.blue == 0 })
+        controller.hue = 0
+        controller.arrow(68)
+        precondition(controller.hue == 355)
+        controller.arrow(67)
+        precondition(controller.hue == 0)
+        controller.arrow(66)
+        precondition(controller.brightness == 0)
+        controller.arrow(65)
+        precondition(controller.brightness == 1)
+        controller.brightness = 100
+        controller.arrow(65)
+        precondition(controller.brightness == 100)
         print("Passed: Xcode default packet, segment clamping, rainbow coverage/encoding, and off brightness.")
     }
 }
@@ -500,9 +544,66 @@ if CommandLine.arguments.contains("--help") {
 print("Amp Visualizer · PSL terminal light controller\n" + LightController.help)
 let ble = BLEManager()
 let controller = LightController(ble)
+if isatty(STDIN_FILENO) != 0 && tcgetattr(STDIN_FILENO, &savedTerminal) == 0 {
+    var terminal = savedTerminal
+    terminal.c_lflag &= ~tcflag_t(ICANON | ECHO)
+    terminal.c_cc.16 = 1 // VMIN on macOS
+    terminal.c_cc.17 = 0 // VTIME on macOS
+    if tcsetattr(STDIN_FILENO, TCSANOW, &terminal) == 0 {
+        terminalChanged = true
+        atexit { restoreTerminal() }
+        signal(SIGINT) { _ in restoreTerminal(); exit(130) }
+        signal(SIGTERM) { _ in restoreTerminal(); exit(143) }
+        signal(SIGHUP) { _ in restoreTerminal(); exit(129) }
+    }
+}
 DispatchQueue.global(qos: .userInitiated).async {
-    while let line = readLine() {
-        DispatchQueue.main.async { controller.command(line) }
+    if terminalChanged {
+        var line: [UInt8] = []
+        var escape = false
+        var sequence = false
+        var byte: UInt8 = 0
+        while read(STDIN_FILENO, &byte, 1) == 1 {
+            if sequence {
+                if byte >= 0x40 && byte <= 0x7E {
+                    let key = byte
+                    DispatchQueue.main.async { controller.arrow(key) }
+                    sequence = false
+                }
+                continue
+            }
+            if escape {
+                escape = false
+                if byte == 91 || byte == 79 { sequence = true; continue }
+            }
+            switch byte {
+            case 27: escape = true
+            case 4: DispatchQueue.main.async { exit(0) }; return
+            case 10, 13:
+                print("")
+                let command = String(decoding: line, as: UTF8.self)
+                line.removeAll()
+                DispatchQueue.main.async { controller.command(command) }
+            case 8, 127:
+                if !line.isEmpty {
+                    var removed = line.removeLast()
+                    while removed & 0xC0 == 0x80 && !line.isEmpty { removed = line.removeLast() }
+                    print("\u{8} \u{8}", terminator: "")
+                    fflush(stdout)
+                }
+            case let key where line.isEmpty && [43, 45, 91, 93].contains(key):
+                DispatchQueue.main.async { controller.segmentKey(key) }
+            case 32...255:
+                line.append(byte)
+                var echoed = byte
+                _ = write(STDOUT_FILENO, &echoed, 1)
+            default: break
+            }
+        }
+    } else {
+        while let line = readLine() {
+            DispatchQueue.main.async { controller.command(line) }
+        }
     }
     DispatchQueue.main.async { exit(0) }
 }
